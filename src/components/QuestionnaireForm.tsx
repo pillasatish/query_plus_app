@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
-import { X, ChevronRight, AlertCircle, Heart, Download, Video, Calendar, ArrowRight, AlertTriangle, AlertOctagon, Bot, Send, MapPin } from "lucide-react";
+import { X, ChevronRight, AlertCircle, Heart, Download, Video, Calendar, ArrowRight, AlertTriangle, AlertOctagon, Bot, Send, MapPin, Upload, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import TextareaAutosize from 'react-textarea-autosize';
 import { supabase } from "../lib/supabase";
+import ImageUpload from "./ImageUpload";
+import { analyzePhotoWithExternalAPI, PhotoAnalysisResult } from "../lib/externalApi";
 
 interface QuestionnaireFormProps {
   onClose: () => void;
@@ -70,6 +72,9 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [userInput, setUserInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+  const [photoAnalysisResult, setPhotoAnalysisResult] = useState<PhotoAnalysisResult | null>(null);
+  const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const questions = [
@@ -228,11 +233,54 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
         options: nextQuestion.options
       });
     } else {
-      calculateAndShowResults();
+      // Show photo upload after all questions
+      await addMessage({
+        type: 'bot',
+        content: "Great! Now I'd like to analyze a photo of your legs to provide a more accurate assessment. Please upload a clear photo showing the affected area."
+      });
+      setShowPhotoUpload(true);
     }
   };
 
-  const calculateSeverity = () => {
+  const handlePhotoAnalysis = async (imageFile: File) => {
+    setIsAnalyzingPhoto(true);
+    try {
+      await addMessage({
+        type: 'bot',
+        content: "Analyzing your photo with our AI system at varicose-veins.vercel.app. This may take a moment..."
+      });
+
+      // Call the external API
+      const result = await analyzePhotoWithExternalAPI(imageFile, patientInfo, answers);
+      setPhotoAnalysisResult(result);
+      
+      await addMessage({
+        type: 'bot',
+        content: `Photo analysis complete! I've analyzed your image and generated a comprehensive report. The analysis shows a severity level of ${result.severity}/4 with ${Math.round(result.confidence * 100)}% confidence.${result.report_url ? '\n\nA detailed report has been generated and will be available in your results.' : ''}`
+      });
+
+      // Proceed to results
+      calculateAndShowResults(result);
+    } catch (error) {
+      console.error('Error analyzing photo:', error);
+      await addMessage({
+        type: 'bot',
+        content: "I encountered an issue connecting to our analysis service. Let me proceed with the assessment based on your responses."
+      });
+      calculateAndShowResults();
+    } finally {
+      setIsAnalyzingPhoto(false);
+      setShowPhotoUpload(false);
+    }
+  };
+
+  const calculateSeverity = (photoResult?: PhotoAnalysisResult) => {
+    // If we have photo analysis, use that severity
+    if (photoResult?.severity !== undefined) {
+      return photoResult.severity;
+    }
+
+    // Fallback to questionnaire-based calculation
     if (answers.ulcers === "yes") return 4;
     if (answers.bulgingVeins === "yes" || answers.skinDiscoloration === "yes") return 3;
     if (answers.painAndHeaviness === "yes") return 2;
@@ -240,133 +288,150 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     return 0;
   };
 
-  const getStageInfo = (severity: number) => {
-    switch (severity) {
-      case 4:
-        return {
-          title: "Stage 4 – Non-Healing Ulcers or Chronic Venous Insufficiency",
-          description: "You have leg ulcers, open wounds, or venous eczema. This is the most serious stage and needs immediate medical attention.",
-          color: "red",
-          icon: <AlertOctagon className="h-8 w-8 text-red-500" />,
-          treatments: [
-            "Wound care and ulcer management",
-            "Laser or surgical vein treatment",
-            "Long-term compression therapy & monitoring"
-          ],
-          actions: [
-            { label: "Book Urgent Care Consult", icon: <Calendar />, primary: true },
-            { label: "Find Nearest Clinic", icon: <ArrowRight /> },
-            { label: "Begin Wound Care Protocol", icon: <AlertTriangle /> }
-          ]
-        };
-      case 3:
-        return {
-          title: "Stage 3 – Advanced Varicose Veins",
-          description: "You have bulging veins or skin changes. This is a serious condition that requires prompt medical attention to prevent complications.",
-          color: "orange",
-          icon: <AlertTriangle className="h-8 w-8 text-orange-500" />,
-          treatments: [
-            "Endovenous ablation (laser/RFA)",
-            "Phlebectomy (removal of affected veins)",
-            "Skin care + medical compression therapy"
-          ],
-          actions: [
-            { label: "Book In-Person Consultation", icon: <Calendar />, primary: true },
-            { label: "Get Treatment Plan", icon: <ArrowRight /> },
-            { label: "Schedule Within 2-3 Weeks", icon: <AlertTriangle /> }
-          ]
-        };
-      case 2:
-        return {
-          title: "Stage 2 – Moderate Symptoms",
-          description: "You're experiencing pain and heaviness in your legs. Early intervention can prevent progression to more severe stages.",
-          color: "yellow",
-          icon: <AlertCircle className="h-8 w-8 text-yellow-500" />,
-          treatments: [
-            "Sclerotherapy or foam injections",
-            "Endovenous Laser Therapy (EVLT)",
-            "Radiofrequency Ablation (RFA)"
-          ],
-          actions: [
-            { label: "Book Video Consultation", icon: <Video />, primary: true },
-            { label: "Get Doppler Ultrasound", icon: <ArrowRight /> },
-            { label: "Visit Clinic", icon: <Calendar /> }
-          ]
-        };
-      case 1:
-        return {
-          title: "Stage 1 – Spider Veins / Mild Symptoms",
-          description: "You have visible spider veins or light aching in your legs. These symptoms are usually cosmetic but may progress.",
-          color: "blue",
-          icon: <AlertCircle className="h-8 w-8 text-blue-500" />,
-          treatments: [
-            "Lifestyle changes (walking, leg elevation)",
-            "Sclerotherapy (non-surgical injection)",
-            "Medical-grade compression stockings"
-          ],
-          actions: [
-            { label: "Book Consultation", icon: <Calendar />, primary: true },
-            { label: "Explore Treatments", icon: <ArrowRight /> }
-          ]
-        };
-      default:
-        return {
-          title: "Stage 0 – No Visible Signs",
-          description: "You don't have visible varicose veins or typical symptoms, but you might be at risk due to lifestyle, genetics, or early sensations.",
-          color: "green",
-          icon: <Heart className="h-8 w-8 text-green-500" />,
-          treatments: [
-            "Monitor symptoms every 6 months",
-            "Wear compression socks if needed",
-            "Maintain a healthy lifestyle"
-          ],
-          actions: [
-            { label: "Download Prevention Tips", icon: <Download />, primary: true },
-            { label: "Schedule Check-up", icon: <Calendar /> }
-          ]
-        };
+  const getStageInfo = (severity: number, photoResult?: PhotoAnalysisResult) => {
+    const baseStages = {
+      4: {
+        title: "Stage 4 – Non-Healing Ulcers or Chronic Venous Insufficiency",
+        description: "You have leg ulcers, open wounds, or venous eczema. This is the most serious stage and needs immediate medical attention.",
+        color: "red",
+        icon: <AlertOctagon className="h-8 w-8 text-red-500" />,
+        treatments: [
+          "Wound care and ulcer management",
+          "Laser or surgical vein treatment",
+          "Long-term compression therapy & monitoring"
+        ],
+        actions: [
+          { label: "Book Urgent Care Consult", icon: <Calendar />, primary: true },
+          { label: "Find Nearest Clinic", icon: <ArrowRight /> },
+          { label: "Begin Wound Care Protocol", icon: <AlertTriangle /> }
+        ]
+      },
+      3: {
+        title: "Stage 3 – Advanced Varicose Veins",
+        description: "You have bulging veins or skin changes. This is a serious condition that requires prompt medical attention to prevent complications.",
+        color: "orange",
+        icon: <AlertTriangle className="h-8 w-8 text-orange-500" />,
+        treatments: [
+          "Endovenous ablation (laser/RFA)",
+          "Phlebectomy (removal of affected veins)",
+          "Skin care + medical compression therapy"
+        ],
+        actions: [
+          { label: "Book In-Person Consultation", icon: <Calendar />, primary: true },
+          { label: "Get Treatment Plan", icon: <ArrowRight /> },
+          { label: "Schedule Within 2-3 Weeks", icon: <AlertTriangle /> }
+        ]
+      },
+      2: {
+        title: "Stage 2 – Moderate Symptoms",
+        description: "You're experiencing pain and heaviness in your legs. Early intervention can prevent progression to more severe stages.",
+        color: "yellow",
+        icon: <AlertCircle className="h-8 w-8 text-yellow-500" />,
+        treatments: [
+          "Sclerotherapy or foam injections",
+          "Endovenous Laser Therapy (EVLT)",
+          "Radiofrequency Ablation (RFA)"
+        ],
+        actions: [
+          { label: "Book Video Consultation", icon: <Video />, primary: true },
+          { label: "Get Doppler Ultrasound", icon: <ArrowRight /> },
+          { label: "Visit Clinic", icon: <Calendar /> }
+        ]
+      },
+      1: {
+        title: "Stage 1 – Spider Veins / Mild Symptoms",
+        description: "You have visible spider veins or light aching in your legs. These symptoms are usually cosmetic but may progress.",
+        color: "blue",
+        icon: <AlertCircle className="h-8 w-8 text-blue-500" />,
+        treatments: [
+          "Lifestyle changes (walking, leg elevation)",
+          "Sclerotherapy (non-surgical injection)",
+          "Medical-grade compression stockings"
+        ],
+        actions: [
+          { label: "Book Consultation", icon: <Calendar />, primary: true },
+          { label: "Explore Treatments", icon: <ArrowRight /> }
+        ]
+      },
+      0: {
+        title: "Stage 0 – No Visible Signs",
+        description: "You don't have visible varicose veins or typical symptoms, but you might be at risk due to lifestyle, genetics, or early sensations.",
+        color: "green",
+        icon: <Heart className="h-8 w-8 text-green-500" />,
+        treatments: [
+          "Monitor symptoms every 6 months",
+          "Wear compression socks if needed",
+          "Maintain a healthy lifestyle"
+        ],
+        actions: [
+          { label: "Download Prevention Tips", icon: <Download />, primary: true },
+          { label: "Schedule Check-up", icon: <Calendar /> }
+        ]
+      }
+    };
+
+    const stageInfo = baseStages[severity as keyof typeof baseStages];
+    
+    // If we have photo analysis results, enhance the description
+    if (photoResult && photoResult.findings.length > 0) {
+      return {
+        ...stageInfo,
+        description: `${stageInfo.description}\n\nAI Photo Analysis: ${photoResult.findings.join(', ')}`,
+        treatments: [...stageInfo.treatments, ...photoResult.recommendations]
+      };
     }
+
+    return stageInfo;
   };
 
-  const calculateAndShowResults = async () => {
-    const severity = calculateSeverity();
-    const stageInfo = getStageInfo(severity);
+  const calculateAndShowResults = async (photoResult?: PhotoAnalysisResult) => {
+    const severity = calculateSeverity(photoResult);
+    const stageInfo = getStageInfo(severity, photoResult);
     
     await addMessage({
       type: 'bot',
-      content: `Based on your responses, I've completed your assessment. Here are your results:\n\n${stageInfo.title}\n\n${stageInfo.description}`
+      content: `Based on your responses${photoResult ? ' and AI photo analysis' : ''}, I've completed your assessment. Here are your results:\n\n${stageInfo.title}\n\n${stageInfo.description}`
     });
 
     setStep(3);
-    saveAssessment();
+    saveAssessment(photoResult);
   };
 
-  const saveAssessment = async () => {
-    const severity = calculateSeverity();
-    const stageInfo = getStageInfo(severity);
+  const saveAssessment = async (photoResult?: PhotoAnalysisResult) => {
+    const severity = calculateSeverity(photoResult);
+    const stageInfo = getStageInfo(severity, photoResult);
 
     try {
-      const { error } = await supabase.from("assessments").insert([
-        {
-          spider_veins: answers.spiderVeins,
-          pain_and_heaviness: answers.painAndHeaviness,
-          bulging_veins: answers.bulgingVeins,
-          skin_discoloration: answers.skinDiscoloration,
-          ulcers: answers.ulcers,
-          duration: answers.duration,
-          long_hours: answers.longHours,
-          dvt_history: answers.dvtHistory,
-          family_history: answers.familyHistory,
-          previous_treatments: answers.previousTreatments,
-          existing_conditions: answers.existingConditions,
-          medications: answers.medications,
-          severity_level: severity,
-          recommendation: stageInfo.description,
-          patient_name: patientInfo.name,
-          patient_age: parseInt(patientInfo.age),
-          patient_location: patientInfo.location,
-        },
-      ]);
+      const assessmentData = {
+        spider_veins: answers.spiderVeins,
+        pain_and_heaviness: answers.painAndHeaviness,
+        bulging_veins: answers.bulgingVeins,
+        skin_discoloration: answers.skinDiscoloration,
+        ulcers: answers.ulcers,
+        duration: answers.duration,
+        long_hours: answers.longHours,
+        dvt_history: answers.dvtHistory,
+        family_history: answers.familyHistory,
+        previous_treatments: answers.previousTreatments,
+        existing_conditions: answers.existingConditions,
+        medications: answers.medications,
+        severity_level: severity,
+        recommendation: stageInfo.description,
+        patient_name: patientInfo.name,
+        patient_age: parseInt(patientInfo.age),
+        patient_location: patientInfo.location,
+      };
+
+      // Add photo analysis data if available
+      if (photoResult) {
+        Object.assign(assessmentData, {
+          image_analysis_results: photoResult,
+          image_analysis_confidence: photoResult.confidence,
+          image_analysis_timestamp: new Date().toISOString()
+        });
+      }
+
+      const { error } = await supabase.from("assessments").insert([assessmentData]);
 
       if (error) throw error;
     } catch (error) {
@@ -416,9 +481,52 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     }
   };
 
+  const renderPhotoUpload = () => (
+    <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
+      <div className="flex items-center mb-4">
+        <Upload className="h-6 w-6 text-blue-600 mr-2" />
+        <h4 className="text-lg font-semibold text-blue-900">AI Photo Analysis</h4>
+      </div>
+      <p className="text-blue-800 mb-4">
+        Upload a clear photo of your legs to get AI-powered visual analysis from our advanced system at varicose-veins.vercel.app for more accurate results.
+      </p>
+      
+      <ImageUpload
+        onAnalysisComplete={handlePhotoAnalysis}
+        onError={(error) => {
+          console.error('Photo upload error:', error);
+          addMessage({
+            type: 'bot',
+            content: "There was an issue with the photo upload. Let me proceed with your assessment based on the questionnaire responses."
+          });
+          setShowPhotoUpload(false);
+          calculateAndShowResults();
+        }}
+        isAnalyzing={isAnalyzingPhoto}
+      />
+      
+      <div className="mt-4 text-center">
+        <button
+          onClick={() => {
+            setShowPhotoUpload(false);
+            addMessage({
+              type: 'bot',
+              content: "No problem! I'll proceed with your assessment based on your questionnaire responses."
+            });
+            calculateAndShowResults();
+          }}
+          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+          disabled={isAnalyzingPhoto}
+        >
+          Skip photo analysis and continue
+        </button>
+      </div>
+    </div>
+  );
+
   const renderResults = () => {
-    const severity = calculateSeverity();
-    const stageInfo = getStageInfo(severity);
+    const severity = calculateSeverity(photoAnalysisResult || undefined);
+    const stageInfo = getStageInfo(severity, photoAnalysisResult || undefined);
     const colorClasses = {
       red: "bg-red-50 border-red-200",
       orange: "bg-orange-50 border-orange-200",
@@ -434,9 +542,49 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
             {stageInfo.icon}
             <div className="ml-3">
               <h3 className="text-xl font-bold text-gray-900">{stageInfo.title}</h3>
-              <p className="text-gray-600 mt-1">{stageInfo.description}</p>
+              <p className="text-gray-600 mt-1 whitespace-pre-line">{stageInfo.description}</p>
             </div>
           </div>
+
+          {photoAnalysisResult && (
+            <div className="mt-4 p-4 bg-white rounded-lg border">
+              <h4 className="font-semibold text-gray-900 mb-2">AI Photo Analysis Results:</h4>
+              <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                <div>
+                  <span className="font-medium">Confidence:</span> {Math.round(photoAnalysisResult.confidence * 100)}%
+                </div>
+                <div>
+                  <span className="font-medium">Severity Level:</span> {photoAnalysisResult.severity}/4
+                </div>
+              </div>
+              {photoAnalysisResult.findings.length > 0 && (
+                <div className="mb-3">
+                  <span className="font-medium text-sm">Findings:</span>
+                  <ul className="text-sm text-gray-600 mt-1">
+                    {photoAnalysisResult.findings.map((finding, index) => (
+                      <li key={index} className="flex items-center">
+                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-2"></span>
+                        {finding}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {photoAnalysisResult.report_url && (
+                <div className="mt-3">
+                  <a
+                    href={photoAnalysisResult.report_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download Detailed Report
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-6">
             <h4 className="font-semibold text-gray-900 mb-3">Recommended Treatments:</h4>
@@ -523,6 +671,9 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
             </motion.div>
           ))}
         </AnimatePresence>
+        
+        {showPhotoUpload && renderPhotoUpload()}
+        
         {isTyping && (
           <div className="flex items-center space-x-2 text-gray-500">
             <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
