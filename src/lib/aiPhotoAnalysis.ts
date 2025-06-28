@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { uploadImage, analyzeImage as callSupabaseAnalyzeImage, ImageAnalysisResult as SupabaseImageAnalysisResult } from './imageAnalysis';
 
 // Define the analysis result schema
 const AnalysisResultSchema = z.object({
@@ -34,21 +35,9 @@ interface SymptomAnswers {
   medications: string[];
 }
 
-// External AI service response interface
-interface ExternalAIResponse {
-  prediction: string;
-  confidence: number;
-  analysis?: string;
-  recommendations?: string[];
-  severity?: number;
-}
-
 export class AIPhotoAnalyzer {
-  private externalApiUrl: string;
-
   constructor() {
-    // Use the external varicose veins AI service
-    this.externalApiUrl = 'https://varicose-veins.vercel.app/api/analyze';
+    // Using Supabase Edge Function for AI analysis
   }
 
   async analyzeImage(
@@ -57,117 +46,52 @@ export class AIPhotoAnalyzer {
     symptoms: SymptomAnswers
   ): Promise<PhotoAnalysisResult> {
     try {
-      // Call the external AI service
-      const result = await this.callExternalAI(imageFile, patientInfo, symptoms);
+      // Upload image to get public URL
+      const imageUrl = await uploadImage(imageFile);
       
-      // Transform the external response to our format
-      return this.transformExternalResponse(result, symptoms);
+      // Call Supabase AI analysis
+      const result = await callSupabaseAnalyzeImage(imageUrl);
+      
+      // Transform the Supabase response to our format
+      return this.transformSupabaseResponse(result, symptoms);
     } catch (error) {
-      console.error('External AI Analysis Error:', error);
+      console.error('Supabase AI Analysis Error:', error);
       
       // Fallback to symptom-based analysis
       return this.generateFallbackAnalysis(symptoms);
     }
   }
 
-  private async callExternalAI(
-    imageFile: File,
-    patientInfo: PatientInfo,
-    symptoms: SymptomAnswers
-  ): Promise<ExternalAIResponse> {
-    const formData = new FormData();
-    formData.append('image', imageFile);
-    
-    // Add patient context as metadata
-    formData.append('patientInfo', JSON.stringify({
-      age: patientInfo.age,
-      location: patientInfo.location,
-      symptoms: symptoms
-    }));
-
-    const response = await fetch(this.externalApiUrl, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        // Don't set Content-Type header - let browser set it for FormData
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`External AI service error: ${response.status} ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    return result;
-  }
-
-  private transformExternalResponse(
-    externalResult: ExternalAIResponse,
+  private transformSupabaseResponse(
+    supabaseResult: SupabaseImageAnalysisResult,
     symptoms: SymptomAnswers
   ): PhotoAnalysisResult {
-    // Map external prediction to our severity scale
-    const severity = this.mapPredictionToSeverity(externalResult.prediction, externalResult.severity);
+    // Convert boolean findings object to array of strings
+    const findings: string[] = [];
+    if (supabaseResult.findings.varicose_veins) findings.push('Varicose veins detected');
+    if (supabaseResult.findings.spider_veins) findings.push('Spider veins present');
+    if (supabaseResult.findings.skin_discoloration) findings.push('Skin discoloration observed');
+    if (supabaseResult.findings.swelling) findings.push('Swelling detected');
+    if (supabaseResult.findings.ulcers) findings.push('Ulcers or wounds present');
+    if (supabaseResult.findings.bulging_veins) findings.push('Bulging veins identified');
     
-    // Extract findings from prediction and analysis
-    const findings = this.extractFindings(externalResult.prediction, externalResult.analysis);
+    // If no findings, add a default message
+    if (findings.length === 0) {
+      findings.push('No significant abnormalities detected');
+    }
     
-    // Generate recommendations based on external result
-    const recommendations = externalResult.recommendations || this.generateRecommendations(severity);
+    // Generate recommendations based on severity
+    const recommendations = this.generateRecommendations(supabaseResult.severity);
     
     return {
-      severity,
+      severity: supabaseResult.severity,
       findings,
       recommendations,
-      confidence: externalResult.confidence || 0.8,
-      detailed_analysis: externalResult.analysis || `AI Analysis: ${externalResult.prediction}`,
+      confidence: supabaseResult.confidence,
+      detailed_analysis: supabaseResult.analysis,
       risk_factors: this.identifyRiskFactors(symptoms),
-      treatment_urgency: this.determineTreatmentUrgency(severity)
+      treatment_urgency: this.determineTreatmentUrgency(supabaseResult.severity)
     };
-  }
-
-  private mapPredictionToSeverity(prediction: string, severityFromAPI?: number): number {
-    // If the external API provides severity directly, use it
-    if (severityFromAPI !== undefined && severityFromAPI >= 0 && severityFromAPI <= 4) {
-      return severityFromAPI;
-    }
-
-    // Map prediction text to severity levels
-    const predictionLower = prediction.toLowerCase();
-    
-    if (predictionLower.includes('severe') || predictionLower.includes('ulcer') || predictionLower.includes('stage 4')) {
-      return 4;
-    } else if (predictionLower.includes('advanced') || predictionLower.includes('significant') || predictionLower.includes('stage 3')) {
-      return 3;
-    } else if (predictionLower.includes('moderate') || predictionLower.includes('stage 2')) {
-      return 2;
-    } else if (predictionLower.includes('mild') || predictionLower.includes('spider') || predictionLower.includes('stage 1')) {
-      return 1;
-    } else if (predictionLower.includes('normal') || predictionLower.includes('healthy') || predictionLower.includes('no signs')) {
-      return 0;
-    }
-    
-    // Default to mild if unclear
-    return 1;
-  }
-
-  private extractFindings(prediction: string, analysis?: string): string[] {
-    const findings: string[] = [];
-    const text = `${prediction} ${analysis || ''}`.toLowerCase();
-    
-    if (text.includes('varicose')) findings.push('Varicose veins detected');
-    if (text.includes('spider')) findings.push('Spider veins present');
-    if (text.includes('discolor') || text.includes('pigment')) findings.push('Skin discoloration observed');
-    if (text.includes('swell') || text.includes('edema')) findings.push('Swelling detected');
-    if (text.includes('ulcer') || text.includes('wound')) findings.push('Ulcers or wounds present');
-    if (text.includes('bulg') || text.includes('protrude')) findings.push('Bulging veins identified');
-    if (text.includes('normal') || text.includes('healthy')) findings.push('No significant abnormalities detected');
-    
-    // If no specific findings, use the prediction as a finding
-    if (findings.length === 0) {
-      findings.push(prediction);
-    }
-    
-    return findings;
   }
 
   private generateRecommendations(severity: number): string[] {
@@ -254,7 +178,7 @@ export class AIPhotoAnalyzer {
       findings,
       recommendations: this.generateRecommendations(severity),
       confidence: 0.6, // Lower confidence for fallback
-      detailed_analysis: 'Analysis based on reported symptoms (external AI service unavailable)',
+      detailed_analysis: 'Analysis based on reported symptoms (AI service unavailable)',
       risk_factors: this.identifyRiskFactors(symptoms),
       treatment_urgency: this.determineTreatmentUrgency(severity)
     };
