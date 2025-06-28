@@ -46,18 +46,9 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     location: "",
   });
   const [answers, setAnswers] = useState({
-    spiderVeins: "",
-    painAndHeaviness: "",
-    bulgingVeins: "",
-    skinDiscoloration: "",
+    visibleVeins: "",
     ulcers: "",
-    duration: "",
-    longHours: "",
-    dvtHistory: "",
-    familyHistory: "",
-    previousTreatments: [] as string[],
-    existingConditions: [] as string[],
-    medications: [] as string[]
+    previousTreatment: "",
   });
   const [errors, setErrors] = useState({
     name: "",
@@ -76,25 +67,11 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
   const [photoAnalysisResult, setPhotoAnalysisResult] = useState<PhotoAnalysisResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Simplified to just 3 questions
   const questions = [
     {
-      question: "Do you have thin, web-like veins visible on your legs?",
-      field: "spiderVeins",
-      options: ["Yes", "No"],
-    },
-    {
-      question: "Do you experience pain or heaviness in your legs?",
-      field: "painAndHeaviness",
-      options: ["Yes", "No"],
-    },
-    {
-      question: "Do your veins appear bulging or twisted?",
-      field: "bulgingVeins",
-      options: ["Yes", "No"],
-    },
-    {
-      question: "Do you have dark patches or discoloration on your legs near your veins?",
-      field: "skinDiscoloration",
+      question: "Do you see any veins visible on your legs?",
+      field: "visibleVeins",
       options: ["Yes", "No"],
     },
     {
@@ -103,65 +80,9 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
       options: ["Yes", "No"],
     },
     {
-      question: "How long have you been experiencing these symptoms?",
-      field: "duration",
-      options: ["Less than 6 months", "6-12 months", "1-2 years", "More than 2 years"],
-    },
-    {
-      question: "Do you spend long hours standing or sitting?",
-      field: "longHours",
+      question: "Have you done any treatment for varicose veins previously?",
+      field: "previousTreatment",
       options: ["Yes", "No"],
-    },
-    {
-      question: "Have you ever been diagnosed with Deep Vein Thrombosis (DVT)?",
-      field: "dvtHistory",
-      options: ["Yes", "No"],
-    },
-    {
-      question: "Do you have a family history of varicose veins?",
-      field: "familyHistory",
-      options: ["Yes", "No"],
-    },
-    {
-      question: "Have you tried any previous treatments for your veins?",
-      field: "previousTreatments",
-      options: [
-        "None",
-        "Compression stockings",
-        "Exercise/lifestyle changes",
-        "Medications",
-        "Surgery",
-        "Sclerotherapy",
-        "Laser treatment"
-      ],
-      multiple: true,
-    },
-    {
-      question: "Do you have any existing medical conditions?",
-      field: "existingConditions",
-      options: [
-        "None",
-        "Diabetes",
-        "High blood pressure",
-        "Heart disease",
-        "Blood clotting disorders",
-        "Obesity",
-        "Other"
-      ],
-      multiple: true,
-    },
-    {
-      question: "Are you currently taking any medications?",
-      field: "medications",
-      options: [
-        "None",
-        "Blood thinners",
-        "Blood pressure medication",
-        "Heart medication",
-        "Hormonal medications",
-        "Other"
-      ],
-      multiple: true,
     }
   ];
 
@@ -209,19 +130,7 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     const currentQ = questions[currentQuestion];
     await addMessage({ type: 'user', content: option });
     
-    if (currentQ.multiple) {
-      const currentAnswers = answers[currentQ.field as keyof typeof answers] as string[] || [];
-      if (option === "None") {
-        handleInputChange(currentQ.field, ["None"]);
-      } else {
-        const updatedAnswers = currentAnswers.includes(option)
-          ? currentAnswers.filter(a => a !== option && a !== "None")
-          : [...currentAnswers.filter(a => a !== "None"), option];
-        handleInputChange(currentQ.field, updatedAnswers);
-      }
-    } else {
-      handleInputChange(currentQ.field.toLowerCase(), option.toLowerCase());
-    }
+    handleInputChange(currentQ.field.toLowerCase(), option.toLowerCase());
 
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(prev => prev + 1);
@@ -235,7 +144,7 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
       // Show photo analysis after all questions
       await addMessage({
         type: 'bot',
-        content: "Excellent! Now I'd like to analyze a photo of your legs to provide the most accurate assessment possible. This will help me give you personalized recommendations based on visual analysis combined with your symptoms."
+        content: "Great! Now I'd like to analyze a photo of your legs to provide the most accurate assessment possible. This will help me give you personalized recommendations based on visual analysis combined with your symptoms."
       });
       setShowPhotoAnalysis(true);
     }
@@ -262,12 +171,11 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
       return photoResult.severity;
     }
 
-    // Fallback to questionnaire-based calculation
+    // Simplified severity calculation based on 3 questions
     if (answers.ulcers === "yes") return 4;
-    if (answers.bulgingVeins === "yes" || answers.skinDiscoloration === "yes") return 3;
-    if (answers.painAndHeaviness === "yes") return 2;
-    if (answers.spiderVeins === "yes") return 1;
-    return 0;
+    if (answers.visibleVeins === "yes" && answers.previousTreatment === "yes") return 3;
+    if (answers.visibleVeins === "yes") return 2;
+    return 1;
   };
 
   const getStageInfo = (severity: number, photoResult?: PhotoAnalysisResult) => {
@@ -289,14 +197,14 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
         ]
       },
       3: {
-        title: "Stage 3 – Advanced Varicose Veins",
-        description: "You have bulging veins or skin changes. This is a serious condition that requires prompt medical attention to prevent complications.",
+        title: "Stage 3 – Advanced Varicose Veins with Previous Treatment",
+        description: "You have visible veins and have tried treatments before. This suggests a more complex condition that may require advanced intervention.",
         color: "orange",
         icon: <AlertTriangle className="h-8 w-8 text-orange-500" />,
         treatments: [
           "Endovenous ablation (laser/RFA)",
           "Phlebectomy (removal of affected veins)",
-          "Skin care + medical compression therapy"
+          "Advanced compression therapy"
         ],
         actions: [
           { label: "Book In-Person Consultation", icon: <Calendar />, primary: true },
@@ -305,14 +213,14 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
         ]
       },
       2: {
-        title: "Stage 2 – Moderate Symptoms",
-        description: "You're experiencing pain and heaviness in your legs. Early intervention can prevent progression to more severe stages.",
+        title: "Stage 2 – Visible Veins Present",
+        description: "You have visible veins on your legs. Early intervention can prevent progression to more severe stages.",
         color: "yellow",
         icon: <AlertCircle className="h-8 w-8 text-yellow-500" />,
         treatments: [
           "Sclerotherapy or foam injections",
           "Endovenous Laser Therapy (EVLT)",
-          "Radiofrequency Ablation (RFA)"
+          "Compression stockings"
         ],
         actions: [
           { label: "Book Video Consultation", icon: <Video />, primary: true },
@@ -321,33 +229,18 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
         ]
       },
       1: {
-        title: "Stage 1 – Spider Veins / Mild Symptoms",
-        description: "You have visible spider veins or light aching in your legs. These symptoms are usually cosmetic but may progress.",
+        title: "Stage 1 – Early Assessment / Prevention",
+        description: "Based on your responses, you may be in the early stages or at risk. Regular monitoring and preventive care are recommended.",
         color: "blue",
         icon: <AlertCircle className="h-8 w-8 text-blue-500" />,
         treatments: [
           "Lifestyle changes (walking, leg elevation)",
-          "Sclerotherapy (non-surgical injection)",
-          "Medical-grade compression stockings"
+          "Preventive compression stockings",
+          "Regular monitoring"
         ],
         actions: [
           { label: "Book Consultation", icon: <Calendar />, primary: true },
-          { label: "Explore Treatments", icon: <ArrowRight /> }
-        ]
-      },
-      0: {
-        title: "Stage 0 – No Visible Signs",
-        description: "You don't have visible varicose veins or typical symptoms, but you might be at risk due to lifestyle, genetics, or early sensations.",
-        color: "green",
-        icon: <Heart className="h-8 w-8 text-green-500" />,
-        treatments: [
-          "Monitor symptoms every 6 months",
-          "Wear compression socks if needed",
-          "Maintain a healthy lifestyle"
-        ],
-        actions: [
-          { label: "Download Prevention Tips", icon: <Download />, primary: true },
-          { label: "Schedule Check-up", icon: <Calendar /> }
+          { label: "Learn Prevention Tips", icon: <ArrowRight /> }
         ]
       }
     };
@@ -385,18 +278,19 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
 
     try {
       const assessmentData = {
-        spider_veins: answers.spiderVeins,
-        pain_and_heaviness: answers.painAndHeaviness,
-        bulging_veins: answers.bulgingVeins,
-        skin_discoloration: answers.skinDiscoloration,
+        // Map simplified answers to existing database fields
+        spider_veins: answers.visibleVeins,
+        pain_and_heaviness: "not_asked",
+        bulging_veins: answers.visibleVeins,
+        skin_discoloration: "not_asked",
         ulcers: answers.ulcers,
-        duration: answers.duration,
-        long_hours: answers.longHours,
-        dvt_history: answers.dvtHistory,
-        family_history: answers.familyHistory,
-        previous_treatments: answers.previousTreatments,
-        existing_conditions: answers.existingConditions,
-        medications: answers.medications,
+        duration: "not_asked",
+        long_hours: "not_asked",
+        dvt_history: "not_asked",
+        family_history: "not_asked",
+        previous_treatments: answers.previousTreatment === "yes" ? ["Previous treatment"] : ["None"],
+        existing_conditions: [],
+        medications: [],
         severity_level: severity,
         recommendation: stageInfo.description,
         patient_name: patientInfo.name,
@@ -448,7 +342,7 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     setMessages([]);
     await addMessage({
       type: 'bot',
-      content: `Hi ${patientInfo.name}! I'm your AI health assistant. I'll help assess your vein health through a series of questions. Let's begin!\n\n${questions[0].question}`,
+      content: `Hi ${patientInfo.name}! I'm your AI health assistant. I'll help assess your vein health with just 3 simple questions. Let's begin!\n\n${questions[0].question}`,
       options: questions[0].options
     });
   };
@@ -615,7 +509,20 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
           <div className="mt-6">
             <PhotoAnalysisComponent
               patientInfo={patientInfo}
-              symptoms={answers}
+              symptoms={{
+                spiderVeins: answers.visibleVeins,
+                painAndHeaviness: "not_asked",
+                bulgingVeins: answers.visibleVeins,
+                skinDiscoloration: "not_asked",
+                ulcers: answers.ulcers,
+                duration: "not_asked",
+                longHours: "not_asked",
+                dvtHistory: "not_asked",
+                familyHistory: "not_asked",
+                previousTreatments: answers.previousTreatment === "yes" ? ["Previous treatment"] : ["None"],
+                existingConditions: [],
+                medications: []
+              }}
               onAnalysisComplete={handlePhotoAnalysisComplete}
               onSkip={handleSkipPhotoAnalysis}
             />
@@ -655,7 +562,7 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
             <div className="flex items-center justify-center mb-6">
               <Heart className="h-10 w-10 text-primary animate-pulse" />
               <h2 className="text-2xl font-bold text-primary ml-2">
-                QurePlus Assessment
+                QurePlus Quick Assessment
               </h2>
             </div>
 
@@ -782,7 +689,7 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
                     type="submit"
                     className="mt-8 w-full flex items-center justify-center px-4 py-2 border border-transparent text-base font-medium rounded-md text-white bg-primary hover:bg-primary-dark"
                   >
-                    Next Step
+                    Start Quick Assessment
                     <ChevronRight className="ml-2 h-5 w-5" />
                   </button>
                 </form>
