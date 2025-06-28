@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { z } from 'zod';
 
 // Define the analysis result schema
@@ -34,21 +35,14 @@ interface SymptomAnswers {
   medications: string[];
 }
 
-// External AI service response interface
-interface ExternalAIResponse {
-  prediction: string;
-  confidence: number;
-  analysis?: string;
-  recommendations?: string[];
-  severity?: number;
-}
-
 export class AIPhotoAnalyzer {
-  private externalApiUrl: string;
+  private openai: OpenAI;
 
-  constructor() {
-    // Use the external varicose veins AI service
-    this.externalApiUrl = 'https://varicose-veins.vercel.app/api/analyze';
+  constructor(apiKey: string) {
+    this.openai = new OpenAI({
+      apiKey,
+      dangerouslyAllowBrowser: true // Note: In production, this should be handled server-side
+    });
   }
 
   async analyzeImage(
@@ -57,117 +51,175 @@ export class AIPhotoAnalyzer {
     symptoms: SymptomAnswers
   ): Promise<PhotoAnalysisResult> {
     try {
-      // Call the external AI service
-      const result = await this.callExternalAI(imageFile, patientInfo, symptoms);
+      // Convert image to base64
+      const base64Image = await this.fileToBase64(imageFile);
       
-      // Transform the external response to our format
-      return this.transformExternalResponse(result, symptoms);
+      // Create comprehensive prompt with patient context
+      const prompt = this.createAnalysisPrompt(patientInfo, symptoms);
+      
+      const response = await this.openai.chat.completions.create({
+        model: "gpt-4-vision-preview",
+        messages: [
+          {
+            role: "system",
+            content: "You are a specialized AI medical assistant trained in vascular medicine and varicose vein analysis. Analyze medical images with high precision and provide detailed, actionable insights."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: prompt
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`,
+                  detail: "high"
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.1, // Low temperature for consistent medical analysis
+      });
+
+      const analysisText = response.choices[0]?.message?.content;
+      if (!analysisText) {
+        throw new Error('No analysis received from AI');
+      }
+
+      // Parse the structured response
+      const result = this.parseAnalysisResponse(analysisText, symptoms);
+      
+      // Validate the result
+      return AnalysisResultSchema.parse(result);
     } catch (error) {
-      console.error('External AI Analysis Error:', error);
+      console.error('AI Photo Analysis Error:', error);
       
       // Fallback to symptom-based analysis
       return this.generateFallbackAnalysis(symptoms);
     }
   }
 
-  private async callExternalAI(
-    imageFile: File,
-    patientInfo: PatientInfo,
-    symptoms: SymptomAnswers
-  ): Promise<ExternalAIResponse> {
-    const formData = new FormData();
-    formData.append('image', imageFile);
-    
-    // Add patient context as metadata
-    formData.append('patientInfo', JSON.stringify({
-      age: patientInfo.age,
-      location: patientInfo.location,
-      symptoms: symptoms
-    }));
-
-    const response = await fetch(this.externalApiUrl, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        // Don't set Content-Type header - let browser set it for FormData
-      }
+  private async fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        // Remove the data URL prefix
+        const base64Data = base64.split(',')[1];
+        resolve(base64Data);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
     });
-
-    if (!response.ok) {
-      throw new Error(`External AI service error: ${response.status} ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    return result;
   }
 
-  private transformExternalResponse(
-    externalResult: ExternalAIResponse,
-    symptoms: SymptomAnswers
-  ): PhotoAnalysisResult {
-    // Map external prediction to our severity scale
-    const severity = this.mapPredictionToSeverity(externalResult.prediction, externalResult.severity);
-    
-    // Extract findings from prediction and analysis
-    const findings = this.extractFindings(externalResult.prediction, externalResult.analysis);
-    
-    // Generate recommendations based on external result
-    const recommendations = externalResult.recommendations || this.generateRecommendations(severity);
-    
+  private createAnalysisPrompt(patientInfo: PatientInfo, symptoms: SymptomAnswers): string {
+    return `
+Please analyze this medical image of legs for varicose veins and related vascular conditions.
+
+PATIENT CONTEXT:
+- Name: ${patientInfo.name}
+- Age: ${patientInfo.age}
+- Location: ${patientInfo.location}
+
+REPORTED SYMPTOMS:
+- Spider veins: ${symptoms.spiderVeins}
+- Pain and heaviness: ${symptoms.painAndHeaviness}
+- Bulging veins: ${symptoms.bulgingVeins}
+- Skin discoloration: ${symptoms.skinDiscoloration}
+- Ulcers: ${symptoms.ulcers}
+- Duration: ${symptoms.duration}
+- Long hours standing/sitting: ${symptoms.longHours}
+- DVT history: ${symptoms.dvtHistory}
+- Family history: ${symptoms.familyHistory}
+- Previous treatments: ${symptoms.previousTreatments.join(', ')}
+- Existing conditions: ${symptoms.existingConditions.join(', ')}
+- Current medications: ${symptoms.medications.join(', ')}
+
+ANALYSIS REQUIREMENTS:
+1. Examine the image for:
+   - Varicose veins (enlarged, twisted veins)
+   - Spider veins (small, web-like veins)
+   - Skin discoloration or pigmentation changes
+   - Swelling or edema
+   - Ulcers or open wounds
+   - Overall vein health
+
+2. Provide your response in this exact JSON format:
+{
+  "severity": [0-4 integer scale],
+  "findings": ["list of specific visual findings"],
+  "recommendations": ["list of treatment recommendations"],
+  "confidence": [0.0-1.0 confidence score],
+  "detailed_analysis": "comprehensive analysis text",
+  "risk_factors": ["identified risk factors"],
+  "treatment_urgency": "low|medium|high|urgent"
+}
+
+SEVERITY SCALE:
+- 0: No visible signs
+- 1: Mild spider veins or early symptoms
+- 2: Moderate symptoms with visible veins
+- 3: Advanced varicose veins with complications
+- 4: Severe condition with ulcers or major complications
+
+Focus on accuracy and provide actionable medical insights while correlating visual findings with reported symptoms.
+`;
+  }
+
+  private parseAnalysisResponse(analysisText: string, symptoms: SymptomAnswers): PhotoAnalysisResult {
+    try {
+      // Try to extract JSON from the response
+      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('Failed to parse JSON response, using fallback parsing');
+    }
+
+    // Fallback parsing if JSON extraction fails
+    return this.extractAnalysisFromText(analysisText, symptoms);
+  }
+
+  private extractAnalysisFromText(text: string, symptoms: SymptomAnswers): PhotoAnalysisResult {
+    // Extract severity from text
+    let severity = 0;
+    if (text.toLowerCase().includes('severe') || text.toLowerCase().includes('ulcer')) {
+      severity = 4;
+    } else if (text.toLowerCase().includes('advanced') || text.toLowerCase().includes('significant')) {
+      severity = 3;
+    } else if (text.toLowerCase().includes('moderate')) {
+      severity = 2;
+    } else if (text.toLowerCase().includes('mild') || text.toLowerCase().includes('spider')) {
+      severity = 1;
+    }
+
+    // Extract findings
+    const findings: string[] = [];
+    if (text.toLowerCase().includes('varicose')) findings.push('Varicose veins detected');
+    if (text.toLowerCase().includes('spider')) findings.push('Spider veins present');
+    if (text.toLowerCase().includes('discolor')) findings.push('Skin discoloration observed');
+    if (text.toLowerCase().includes('swell')) findings.push('Swelling detected');
+    if (text.toLowerCase().includes('ulcer')) findings.push('Ulcers or wounds present');
+
+    // Generate recommendations based on severity
+    const recommendations = this.generateRecommendations(severity);
+
     return {
       severity,
       findings,
       recommendations,
-      confidence: externalResult.confidence || 0.8,
-      detailed_analysis: externalResult.analysis || `AI Analysis: ${externalResult.prediction}`,
+      confidence: 0.75,
+      detailed_analysis: text,
       risk_factors: this.identifyRiskFactors(symptoms),
       treatment_urgency: this.determineTreatmentUrgency(severity)
     };
-  }
-
-  private mapPredictionToSeverity(prediction: string, severityFromAPI?: number): number {
-    // If the external API provides severity directly, use it
-    if (severityFromAPI !== undefined && severityFromAPI >= 0 && severityFromAPI <= 4) {
-      return severityFromAPI;
-    }
-
-    // Map prediction text to severity levels
-    const predictionLower = prediction.toLowerCase();
-    
-    if (predictionLower.includes('severe') || predictionLower.includes('ulcer') || predictionLower.includes('stage 4')) {
-      return 4;
-    } else if (predictionLower.includes('advanced') || predictionLower.includes('significant') || predictionLower.includes('stage 3')) {
-      return 3;
-    } else if (predictionLower.includes('moderate') || predictionLower.includes('stage 2')) {
-      return 2;
-    } else if (predictionLower.includes('mild') || predictionLower.includes('spider') || predictionLower.includes('stage 1')) {
-      return 1;
-    } else if (predictionLower.includes('normal') || predictionLower.includes('healthy') || predictionLower.includes('no signs')) {
-      return 0;
-    }
-    
-    // Default to mild if unclear
-    return 1;
-  }
-
-  private extractFindings(prediction: string, analysis?: string): string[] {
-    const findings: string[] = [];
-    const text = `${prediction} ${analysis || ''}`.toLowerCase();
-    
-    if (text.includes('varicose')) findings.push('Varicose veins detected');
-    if (text.includes('spider')) findings.push('Spider veins present');
-    if (text.includes('discolor') || text.includes('pigment')) findings.push('Skin discoloration observed');
-    if (text.includes('swell') || text.includes('edema')) findings.push('Swelling detected');
-    if (text.includes('ulcer') || text.includes('wound')) findings.push('Ulcers or wounds present');
-    if (text.includes('bulg') || text.includes('protrude')) findings.push('Bulging veins identified');
-    if (text.includes('normal') || text.includes('healthy')) findings.push('No significant abnormalities detected');
-    
-    // If no specific findings, use the prediction as a finding
-    if (findings.length === 0) {
-      findings.push(prediction);
-    }
-    
-    return findings;
   }
 
   private generateRecommendations(severity: number): string[] {
@@ -254,7 +306,7 @@ export class AIPhotoAnalyzer {
       findings,
       recommendations: this.generateRecommendations(severity),
       confidence: 0.6, // Lower confidence for fallback
-      detailed_analysis: 'Analysis based on reported symptoms (external AI service unavailable)',
+      detailed_analysis: 'Analysis based on reported symptoms (image analysis unavailable)',
       risk_factors: this.identifyRiskFactors(symptoms),
       treatment_urgency: this.determineTreatmentUrgency(severity)
     };
@@ -262,6 +314,13 @@ export class AIPhotoAnalyzer {
 }
 
 // Factory function to create analyzer instance
-export function createPhotoAnalyzer(): AIPhotoAnalyzer {
-  return new AIPhotoAnalyzer();
+export function createPhotoAnalyzer(): AIPhotoAnalyzer | null {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+  
+  if (!apiKey) {
+    console.warn('OpenAI API key not found. Photo analysis will use fallback method.');
+    return null;
+  }
+  
+  return new AIPhotoAnalyzer(apiKey);
 }
