@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { X, ChevronRight, AlertCircle, Heart, Download, Video, Calendar, ArrowRight, AlertTriangle, AlertOctagon, Bot, Send, MapPin } from "lucide-react";
+import { X, ChevronRight, AlertCircle, Heart, Download, Video, Calendar, ArrowRight, AlertTriangle, AlertOctagon, Bot, Send, MapPin, CheckCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import TextareaAutosize from 'react-textarea-autosize';
 import { supabase } from "../lib/supabase";
@@ -180,6 +180,21 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
 
   const getStageInfo = (severity: number, photoResult?: PhotoAnalysisResult) => {
     const baseStages = {
+      0: {
+        title: "Stage 0 – Healthy Legs / No Visible Signs",
+        description: "Great news! Based on your assessment, your legs appear healthy with no visible signs of vein problems. Continue with preventive care to maintain good vein health.",
+        color: "green",
+        icon: <CheckCircle className="h-8 w-8 text-green-500" />,
+        treatments: [
+          "Continue regular exercise and walking",
+          "Maintain healthy weight",
+          "Elevate legs when resting"
+        ],
+        actions: [
+          { label: "Schedule Preventive Check-up", icon: <Calendar />, primary: true },
+          { label: "Learn Prevention Tips", icon: <ArrowRight /> }
+        ]
+      },
       4: {
         title: "Stage 4 – Non-Healing Ulcers or Chronic Venous Insufficiency",
         description: "You have leg ulcers, open wounds, or venous eczema. This is the most serious stage and needs immediate medical attention.",
