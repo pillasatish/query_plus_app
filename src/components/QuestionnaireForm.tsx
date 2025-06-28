@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
-import { X, ChevronRight, AlertCircle, Heart, Download, Video, Calendar, ArrowRight, AlertTriangle, AlertOctagon, Bot, Send, MapPin, Upload, Loader2, ExternalLink } from "lucide-react";
+import { X, ChevronRight, AlertCircle, Heart, Download, Video, Calendar, ArrowRight, AlertTriangle, AlertOctagon, Bot, Send, MapPin } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import TextareaAutosize from 'react-textarea-autosize';
 import { supabase } from "../lib/supabase";
+import PhotoAnalysisComponent from "./PhotoAnalysisComponent";
+import { PhotoAnalysisResult } from "../lib/aiPhotoAnalysis";
 
 interface QuestionnaireFormProps {
   onClose: () => void;
@@ -12,15 +14,6 @@ interface Message {
   type: 'bot' | 'user';
   content: string;
   options?: string[];
-}
-
-interface PhotoAnalysisResult {
-  severity: number;
-  findings: string[];
-  recommendations: string[];
-  confidence: number;
-  report_url?: string;
-  analysis_id?: string;
 }
 
 // List of major Indian cities
@@ -79,9 +72,8 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [userInput, setUserInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [showExternalRedirect, setShowExternalRedirect] = useState(false);
+  const [showPhotoAnalysis, setShowPhotoAnalysis] = useState(false);
   const [photoAnalysisResult, setPhotoAnalysisResult] = useState<PhotoAnalysisResult | null>(null);
-  const [waitingForReturn, setWaitingForReturn] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const questions = [
@@ -240,90 +232,23 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
         options: nextQuestion.options
       });
     } else {
-      // Show external redirect after all questions
+      // Show photo analysis after all questions
       await addMessage({
         type: 'bot',
-        content: "Great! Now I'd like to analyze a photo of your legs to provide a more accurate assessment. I'll redirect you to our specialized AI photo analysis system where you can upload your photo and get detailed results."
+        content: "Excellent! Now I'd like to analyze a photo of your legs to provide the most accurate assessment possible. This will help me give you personalized recommendations based on visual analysis combined with your symptoms."
       });
-      setShowExternalRedirect(true);
+      setShowPhotoAnalysis(true);
     }
   };
 
-  const handleExternalRedirect = () => {
-    // Create a unique session ID for tracking
-    const sessionId = `qureplus_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Prepare data to send to external API
-    const assessmentData = {
-      sessionId,
-      patientInfo,
-      symptoms: answers,
-      timestamp: new Date().toISOString(),
-      returnUrl: window.location.origin
-    };
-
-    // Store data in localStorage for when user returns
-    localStorage.setItem('qureplus_assessment', JSON.stringify(assessmentData));
-    
-    // Construct URL with query parameters
-    const externalUrl = new URL('https://varicose-veins.vercel.app/');
-    externalUrl.searchParams.set('session', sessionId);
-    externalUrl.searchParams.set('patient', patientInfo.name);
-    externalUrl.searchParams.set('return', window.location.origin);
-    
-    // Open external API in new tab
-    const newWindow = window.open(externalUrl.toString(), '_blank');
-    
-    if (newWindow) {
-      setWaitingForReturn(true);
-      setShowExternalRedirect(false);
-      
-      addMessage({
-        type: 'bot',
-        content: "I've opened our AI photo analysis system in a new tab. Please upload your photo there and complete the analysis. Once you're done, you can return here to see your complete assessment results."
-      });
-
-      // Listen for messages from the external window
-      const handleMessage = (event: MessageEvent) => {
-        if (event.origin === 'https://varicose-veins.vercel.app') {
-          if (event.data.type === 'ANALYSIS_COMPLETE') {
-            setPhotoAnalysisResult(event.data.result);
-            setWaitingForReturn(false);
-            calculateAndShowResults(event.data.result);
-            window.removeEventListener('message', handleMessage);
-          }
-        }
-      };
-
-      window.addEventListener('message', handleMessage);
-
-      // Check if window is closed without completing analysis
-      const checkClosed = setInterval(() => {
-        if (newWindow.closed) {
-          clearInterval(checkClosed);
-          if (waitingForReturn) {
-            addMessage({
-              type: 'bot',
-              content: "It looks like you closed the analysis window. Would you like to continue with your assessment based on the questionnaire responses, or try the photo analysis again?"
-            });
-            setWaitingForReturn(false);
-            setShowExternalRedirect(true);
-          }
-          window.removeEventListener('message', handleMessage);
-        }
-      }, 1000);
-    } else {
-      // Popup blocked - provide direct link
-      addMessage({
-        type: 'bot',
-        content: `It seems your browser blocked the popup. Please click this link to open our AI photo analysis system: ${externalUrl.toString()}\n\nAfter completing your analysis, return here to see your results.`
-      });
-    }
+  const handlePhotoAnalysisComplete = (result: PhotoAnalysisResult) => {
+    setPhotoAnalysisResult(result);
+    setShowPhotoAnalysis(false);
+    calculateAndShowResults(result);
   };
 
   const handleSkipPhotoAnalysis = () => {
-    setShowExternalRedirect(false);
-    setWaitingForReturn(false);
+    setShowPhotoAnalysis(false);
     addMessage({
       type: 'bot',
       content: "No problem! I'll proceed with your assessment based on your questionnaire responses."
@@ -538,80 +463,6 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     }
   };
 
-  const renderExternalRedirect = () => (
-    <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
-      <div className="flex items-center mb-4">
-        <ExternalLink className="h-6 w-6 text-blue-600 mr-2" />
-        <h4 className="text-lg font-semibold text-blue-900">AI Photo Analysis</h4>
-      </div>
-      <p className="text-blue-800 mb-4">
-        To provide you with the most accurate assessment, I'll redirect you to our specialized AI photo analysis system. This will allow you to upload your photo and receive detailed visual analysis.
-      </p>
-      
-      <div className="bg-white p-4 rounded-lg border border-blue-200 mb-4">
-        <h5 className="font-semibold text-blue-900 mb-2">What happens next:</h5>
-        <ol className="list-decimal list-inside text-sm text-blue-800 space-y-1">
-          <li>Click the button below to open our AI analysis system</li>
-          <li>Upload a clear photo of your legs showing the affected area</li>
-          <li>Wait for the AI to analyze your photo (usually takes 1-2 minutes)</li>
-          <li>Review your detailed analysis report</li>
-          <li>Return here to see your complete assessment results</li>
-        </ol>
-      </div>
-
-      <div className="space-y-3">
-        <button
-          onClick={handleExternalRedirect}
-          className="w-full flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
-        >
-          <ExternalLink className="h-5 w-5 mr-2" />
-          Open AI Photo Analysis System
-        </button>
-        
-        <button
-          onClick={handleSkipPhotoAnalysis}
-          className="w-full flex items-center justify-center px-4 py-3 border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 transition-colors"
-        >
-          Skip Photo Analysis & Continue
-        </button>
-      </div>
-
-      <div className="mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-        <p className="text-xs text-yellow-800">
-          <strong>Note:</strong> The photo analysis system will open in a new tab. Please keep this window open to return and see your complete results.
-        </p>
-      </div>
-    </div>
-  );
-
-  const renderWaitingForReturn = () => (
-    <div className="mt-6 p-6 bg-green-50 rounded-lg border border-green-200">
-      <div className="flex items-center mb-4">
-        <Loader2 className="h-6 w-6 text-green-600 mr-2 animate-spin" />
-        <h4 className="text-lg font-semibold text-green-900">Waiting for Analysis Results</h4>
-      </div>
-      <p className="text-green-800 mb-4">
-        Please complete your photo analysis in the other tab and return here to see your complete assessment results.
-      </p>
-      
-      <div className="bg-white p-4 rounded-lg border border-green-200 mb-4">
-        <h5 className="font-semibold text-green-900 mb-2">If you're having trouble:</h5>
-        <ul className="list-disc list-inside text-sm text-green-800 space-y-1">
-          <li>Make sure the analysis tab is still open</li>
-          <li>Complete the photo upload and wait for results</li>
-          <li>The results will automatically appear here when ready</li>
-        </ul>
-      </div>
-
-      <button
-        onClick={handleSkipPhotoAnalysis}
-        className="w-full flex items-center justify-center px-4 py-3 border border-green-600 text-green-600 rounded-md hover:bg-green-50 transition-colors"
-      >
-        Continue Without Photo Analysis
-      </button>
-    </div>
-  );
-
   const renderResults = () => {
     const severity = calculateSeverity(photoAnalysisResult || undefined);
     const stageInfo = getStageInfo(severity, photoAnalysisResult || undefined);
@@ -658,17 +509,17 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
                   </ul>
                 </div>
               )}
-              {photoAnalysisResult.report_url && (
-                <div className="mt-3">
-                  <a
-                    href={photoAnalysisResult.report_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    <Download className="h-4 w-4 mr-1" />
-                    Download Detailed Report
-                  </a>
+              {photoAnalysisResult.treatment_urgency && (
+                <div className="mb-3">
+                  <span className="font-medium text-sm">Treatment Urgency:</span>
+                  <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                    photoAnalysisResult.treatment_urgency === 'urgent' ? 'bg-red-100 text-red-800' :
+                    photoAnalysisResult.treatment_urgency === 'high' ? 'bg-orange-100 text-orange-800' :
+                    photoAnalysisResult.treatment_urgency === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-green-100 text-green-800'
+                  }`}>
+                    {photoAnalysisResult.treatment_urgency.charAt(0).toUpperCase() + photoAnalysisResult.treatment_urgency.slice(1)}
+                  </span>
                 </div>
               )}
             </div>
@@ -760,8 +611,16 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
           ))}
         </AnimatePresence>
         
-        {showExternalRedirect && renderExternalRedirect()}
-        {waitingForReturn && renderWaitingForReturn()}
+        {showPhotoAnalysis && (
+          <div className="mt-6">
+            <PhotoAnalysisComponent
+              patientInfo={patientInfo}
+              symptoms={answers}
+              onAnalysisComplete={handlePhotoAnalysisComplete}
+              onSkip={handleSkipPhotoAnalysis}
+            />
+          </div>
+        )}
         
         {isTyping && (
           <div className="flex items-center space-x-2 text-gray-500">
@@ -783,10 +642,10 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
       />
 
       <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
-        <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl">
+        <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-4xl">
           <button
             onClick={onClose}
-            className="absolute right-4 top-4 rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+            className="absolute right-4 top-4 rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 z-10"
           >
             <span className="sr-only">Close</span>
             <X className="h-6 w-6" />
