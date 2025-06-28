@@ -140,7 +140,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onAnalysisComplete, onError, 
                     <div className="text-white text-center">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
                       <p className="text-sm">Analyzing with AI...</p>
-                      <p className="text-xs mt-1">Connecting to varicose-veins.vercel.app</p>
+                      <p className="text-xs mt-1">Processing your image</p>
                     </div>
                   </div>
                 )}
@@ -179,7 +179,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onAnalysisComplete, onError, 
           <div>
             <h4 className="text-sm font-medium text-yellow-900">AI Analysis</h4>
             <p className="text-xs text-yellow-800 mt-1">
-              Your photo will be securely analyzed by our AI system at varicose-veins.vercel.app to generate a detailed medical report.
+              Your photo will be securely analyzed by our internal AI system to generate a detailed medical assessment.
             </p>
           </div>
         </div>

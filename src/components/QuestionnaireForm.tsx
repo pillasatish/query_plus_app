@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import TextareaAutosize from 'react-textarea-autosize';
 import { supabase } from "../lib/supabase";
 import ImageUpload from "./ImageUpload";
-import { analyzePhotoWithExternalAPI, PhotoAnalysisResult } from "../lib/externalApi";
+import { uploadImage, analyzeImage } from "../lib/imageAnalysis";
 
 interface QuestionnaireFormProps {
   onClose: () => void;
@@ -14,6 +14,15 @@ interface Message {
   type: 'bot' | 'user';
   content: string;
   options?: string[];
+}
+
+interface PhotoAnalysisResult {
+  severity: number;
+  findings: string[];
+  recommendations: string[];
+  confidence: number;
+  report_url?: string;
+  analysis_id?: string;
 }
 
 // List of major Indian cities
@@ -247,25 +256,41 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
     try {
       await addMessage({
         type: 'bot',
-        content: "Analyzing your photo with our AI system at varicose-veins.vercel.app. This may take a moment..."
+        content: "Analyzing your photo with our AI system. This may take a moment..."
       });
 
-      // Call the external API
-      const result = await analyzePhotoWithExternalAPI(imageFile, patientInfo, answers);
-      setPhotoAnalysisResult(result);
+      // Upload image to Supabase storage
+      const imageUrl = await uploadImage(imageFile);
+      
+      // Analyze image using Supabase Edge Function
+      const analysisResult = await analyzeImage(imageUrl, {
+        patientInfo,
+        symptoms: answers
+      });
+
+      // Transform the result to match expected structure
+      const photoResult: PhotoAnalysisResult = {
+        severity: analysisResult.severity || 0,
+        findings: analysisResult.findings || [],
+        recommendations: analysisResult.recommendations || [],
+        confidence: analysisResult.confidence || 0.7,
+        analysis_id: analysisResult.analysis_id
+      };
+
+      setPhotoAnalysisResult(photoResult);
       
       await addMessage({
         type: 'bot',
-        content: `Photo analysis complete! I've analyzed your image and generated a comprehensive report. The analysis shows a severity level of ${result.severity}/4 with ${Math.round(result.confidence * 100)}% confidence.${result.report_url ? '\n\nA detailed report has been generated and will be available in your results.' : ''}`
+        content: `Photo analysis complete! I've analyzed your image and generated a comprehensive report. The analysis shows a severity level of ${photoResult.severity}/4 with ${Math.round(photoResult.confidence * 100)}% confidence.`
       });
 
       // Proceed to results
-      calculateAndShowResults(result);
+      calculateAndShowResults(photoResult);
     } catch (error) {
       console.error('Error analyzing photo:', error);
       await addMessage({
         type: 'bot',
-        content: "I encountered an issue connecting to our analysis service. Let me proceed with the assessment based on your responses."
+        content: "I encountered an issue with the photo analysis. Let me proceed with the assessment based on your responses."
       });
       calculateAndShowResults();
     } finally {
@@ -488,7 +513,7 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({ onClose }) => {
         <h4 className="text-lg font-semibold text-blue-900">AI Photo Analysis</h4>
       </div>
       <p className="text-blue-800 mb-4">
-        Upload a clear photo of your legs to get AI-powered visual analysis from our advanced system at varicose-veins.vercel.app for more accurate results.
+        Upload a clear photo of your legs to get AI-powered visual analysis for more accurate results.
       </p>
       
       <ImageUpload
