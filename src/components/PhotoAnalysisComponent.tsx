@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, X, Loader2, Camera, AlertCircle, CheckCircle, Eye, Brain } from 'lucide-react';
+import { Upload, X, Loader2, Camera, AlertCircle, CheckCircle, Eye, Brain, Zap } from 'lucide-react';
 import { createPhotoAnalyzer, PhotoAnalysisResult } from '../lib/aiPhotoAnalysis';
 
 interface PhotoAnalysisComponentProps {
@@ -90,10 +90,11 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
 
   const simulateProgress = () => {
     const stages = [
-      { progress: 20, stage: 'Processing image...' },
-      { progress: 40, stage: 'Analyzing vein patterns...' },
-      { progress: 60, stage: 'Correlating with symptoms...' },
-      { progress: 80, stage: 'Generating recommendations...' },
+      { progress: 15, stage: 'Uploading image to AI service...' },
+      { progress: 30, stage: 'Processing image with advanced AI...' },
+      { progress: 50, stage: 'Analyzing vein patterns and structures...' },
+      { progress: 70, stage: 'Correlating findings with symptoms...' },
+      { progress: 85, stage: 'Generating personalized recommendations...' },
       { progress: 100, stage: 'Analysis complete!' }
     ];
 
@@ -106,7 +107,7 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
       } else {
         clearInterval(interval);
       }
-    }, 1000);
+    }, 800);
 
     return interval;
   };
@@ -117,79 +118,37 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
     setIsAnalyzing(true);
     setError(null);
     setAnalysisProgress(0);
-    setAnalysisStage('Initializing AI analysis...');
+    setAnalysisStage('Connecting to AI service...');
 
     const progressInterval = simulateProgress();
 
     try {
       const analyzer = createPhotoAnalyzer();
+      const result = await analyzer.analyzeImage(selectedImage, patientInfo, symptoms);
       
-      if (!analyzer) {
-        // Fallback analysis without OpenAI
-        setAnalysisStage('Using symptom-based analysis...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const fallbackResult: PhotoAnalysisResult = {
-          severity: calculateFallbackSeverity(),
-          findings: generateFallbackFindings(),
-          recommendations: generateFallbackRecommendations(),
-          confidence: 0.7,
-          detailed_analysis: 'Analysis based on reported symptoms and basic image processing.',
-          risk_factors: identifyRiskFactors(),
-          treatment_urgency: 'medium'
-        };
-        
-        onAnalysisComplete(fallbackResult);
-      } else {
-        const result = await analyzer.analyzeImage(selectedImage, patientInfo, symptoms);
-        onAnalysisComplete(result);
-      }
+      // Clear the progress interval and show completion
+      clearInterval(progressInterval);
+      setAnalysisProgress(100);
+      setAnalysisStage('Analysis complete!');
+      
+      // Small delay to show completion
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      onAnalysisComplete(result);
     } catch (error) {
       console.error('Analysis error:', error);
-      setError('Analysis failed. Please try again or skip this step.');
-    } finally {
       clearInterval(progressInterval);
+      
+      if (error instanceof Error && error.message.includes('External AI service error')) {
+        setError('Unable to connect to AI service. Please check your internet connection and try again.');
+      } else {
+        setError('Analysis failed. Please try again or skip this step.');
+      }
+    } finally {
       setIsAnalyzing(false);
       setAnalysisProgress(0);
       setAnalysisStage('');
     }
-  };
-
-  const calculateFallbackSeverity = (): number => {
-    if (symptoms.ulcers === 'yes') return 4;
-    if (symptoms.bulgingVeins === 'yes' || symptoms.skinDiscoloration === 'yes') return 3;
-    if (symptoms.painAndHeaviness === 'yes') return 2;
-    if (symptoms.spiderVeins === 'yes') return 1;
-    return 0;
-  };
-
-  const generateFallbackFindings = (): string[] => {
-    const findings: string[] = [];
-    if (symptoms.spiderVeins === 'yes') findings.push('Spider veins reported');
-    if (symptoms.painAndHeaviness === 'yes') findings.push('Pain and heaviness symptoms');
-    if (symptoms.bulgingVeins === 'yes') findings.push('Bulging veins reported');
-    if (symptoms.skinDiscoloration === 'yes') findings.push('Skin discoloration noted');
-    if (symptoms.ulcers === 'yes') findings.push('Ulcers or wounds present');
-    return findings;
-  };
-
-  const generateFallbackRecommendations = (): string[] => {
-    const severity = calculateFallbackSeverity();
-    switch (severity) {
-      case 4: return ['Immediate medical consultation', 'Wound care management'];
-      case 3: return ['Schedule consultation soon', 'Consider advanced treatments'];
-      case 2: return ['Lifestyle modifications', 'Compression therapy'];
-      case 1: return ['Monitor symptoms', 'Preventive measures'];
-      default: return ['Maintain healthy lifestyle', 'Regular check-ups'];
-    }
-  };
-
-  const identifyRiskFactors = (): string[] => {
-    const factors: string[] = [];
-    if (symptoms.familyHistory === 'yes') factors.push('Family history');
-    if (symptoms.longHours === 'yes') factors.push('Prolonged standing/sitting');
-    if (symptoms.dvtHistory === 'yes') factors.push('DVT history');
-    return factors;
   };
 
   const clearImage = () => {
@@ -202,10 +161,28 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
     <div className="w-full max-w-2xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <div className="flex items-center mb-6">
-          <Brain className="h-8 w-8 text-primary mr-3" />
+          <div className="relative">
+            <Brain className="h-8 w-8 text-primary mr-3" />
+            <Zap className="h-4 w-4 text-yellow-500 absolute -top-1 -right-1" />
+          </div>
           <div>
-            <h3 className="text-xl font-bold text-gray-900">AI Photo Analysis</h3>
-            <p className="text-gray-600">Upload a photo for advanced AI-powered vein analysis</p>
+            <h3 className="text-xl font-bold text-gray-900">Advanced AI Photo Analysis</h3>
+            <p className="text-gray-600">Powered by specialized varicose vein detection AI</p>
+          </div>
+        </div>
+
+        {/* AI Service Info */}
+        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
+          <div className="flex items-start">
+            <Zap className="h-5 w-5 text-blue-600 mt-0.5 mr-2 flex-shrink-0" />
+            <div>
+              <h4 className="text-sm font-medium text-blue-900">External AI Integration</h4>
+              <p className="text-xs text-blue-800 mt-1">
+                Your photo will be analyzed by our specialized varicose vein AI service at{' '}
+                <span className="font-mono bg-blue-100 px-1 rounded">varicose-veins.vercel.app</span>
+                {' '}for the most accurate medical assessment.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -276,12 +253,12 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
                 )}
                 {isAnalyzing && (
                   <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
-                    <div className="text-white text-center">
+                    <div className="text-white text-center max-w-xs">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
                       <p className="text-sm font-medium">{analysisStage}</p>
-                      <div className="w-48 bg-gray-200 rounded-full h-2 mt-2">
+                      <div className="w-48 bg-gray-200 rounded-full h-2 mt-3">
                         <div 
-                          className="bg-primary h-2 rounded-full transition-all duration-300"
+                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500"
                           style={{ width: `${analysisProgress}%` }}
                         ></div>
                       </div>
@@ -298,7 +275,7 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
         <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
           <h4 className="text-sm font-medium text-blue-900 mb-2 flex items-center">
             <Eye className="h-4 w-4 mr-2" />
-            Photo Guidelines for Best Results:
+            Photo Guidelines for Best AI Analysis:
           </h4>
           <ul className="text-xs text-blue-800 space-y-1">
             <li>• Ensure good lighting and clear visibility</li>
@@ -315,10 +292,10 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
           {selectedImage && !isAnalyzing && (
             <button
               onClick={handleAnalyze}
-              className="w-full flex items-center justify-center px-4 py-3 bg-primary text-white rounded-md hover:bg-primary-dark transition-colors font-medium"
+              className="w-full flex items-center justify-center px-4 py-3 bg-gradient-to-r from-primary to-purple-600 text-white rounded-md hover:from-primary-dark hover:to-purple-700 transition-all duration-200 font-medium shadow-md"
             >
               <Brain className="h-5 w-5 mr-2" />
-              Analyze Photo with AI
+              Analyze with External AI Service
             </button>
           )}
           
@@ -336,9 +313,10 @@ const PhotoAnalysisComponent: React.FC<PhotoAnalysisComponentProps> = ({
           <div className="flex items-start">
             <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 mr-2 flex-shrink-0" />
             <div>
-              <h4 className="text-sm font-medium text-green-900">Advanced AI Analysis</h4>
+              <h4 className="text-sm font-medium text-green-900">Secure & Advanced Analysis</h4>
               <p className="text-xs text-green-800 mt-1">
-                Our AI system analyzes your photo using advanced computer vision and medical knowledge to provide detailed insights about your vein health, correlating visual findings with your reported symptoms.
+                Your photo is securely processed by our specialized varicose vein AI model, trained on thousands of medical images. 
+                The analysis combines computer vision with medical expertise to provide accurate assessments.
               </p>
             </div>
           </div>
